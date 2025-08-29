@@ -21,6 +21,19 @@ def reconstruct_config_models(config: dict) -> dict:
     return config
 
 
+def serialize_config_models(config: dict) -> dict:
+    """Serialize Pydantic model objects to JSON-safe dictionaries"""
+    config_copy = config.copy()
+    
+    if hasattr(config_copy.get("rtnSettings"), "model_dump"):
+        config_copy["rtnSettings"] = config_copy["rtnSettings"].model_dump()
+    
+    if hasattr(config_copy.get("rtnRanking"), "model_dump"):
+        config_copy["rtnRanking"] = config_copy["rtnRanking"].model_dump()
+    
+    return config_copy
+
+
 class User(BaseModel):
     id: Optional[int] = None
     username: str
@@ -227,7 +240,8 @@ async def update_user(user_id: int, user_update: UserUpdate) -> Optional[User]:
         
     if user_update.config is not None:
         update_fields.append("config = :config")
-        update_values["config"] = json.dumps(user_update.config)
+        serialized_config = serialize_config_models(user_update.config)
+        update_values["config"] = json.dumps(serialized_config)
         
     if user_update.enabled is not None:
         update_fields.append("enabled = :enabled")

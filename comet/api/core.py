@@ -25,6 +25,7 @@ from comet.utils.user_management import (
     update_user,
     delete_user,
     regenerate_user_token,
+    serialize_config_models,
     UserCreate,
     UserUpdate
 )
@@ -623,7 +624,7 @@ async def admin_api_users(admin_session: str = Cookie(None)):
             "enabled": user.enabled,
             "created_at": user.created_at,
             "updated_at": user.updated_at,
-            "config": user.config,
+            "config": serialize_config_models(user.config),
             "debrid_service": user.config.get("debridService", "unknown"),
             "formatted_created": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(user.created_at)),
             "formatted_updated": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(user.updated_at))
