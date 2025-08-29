@@ -1013,6 +1013,10 @@
                           <div class="debrid-label">Total Cached Items</div>
                           <div class="debrid-value" id="debrid-total">0</div>
                         </div>
+                        <div class="debrid-stat">
+                          <div class="debrid-label">Cache Storage Used</div>
+                          <div class="debrid-value" id="debrid-storage">0 B</div>
+                        </div>
                       </div>
                     </div>
 
@@ -1574,6 +1578,8 @@
         // Update performance stats
         document.getElementById("debrid-total").textContent =
           debridData.total.toLocaleString();
+        document.getElementById("debrid-storage").textContent =
+          debridData.total_storage_formatted || "0 B";
 
         // Update services list
         const servicesContainer = document.getElementById("debrid-services");

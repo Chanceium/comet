@@ -454,6 +454,15 @@ async def admin_api_metrics(admin_session: str = Cookie(None)):
         "SELECT COUNT(*) FROM debrid_availability"
     )
 
+    # Total storage used by active cached items
+    total_cache_storage = await database.fetch_val(
+        """
+        SELECT COALESCE(SUM(size), 0) FROM debrid_availability 
+        WHERE timestamp + :cache_ttl >= :current_time
+        """,
+        {"cache_ttl": settings.DEBRID_CACHE_TTL, "current_time": current_time},
+    )
+
     # Debrid cache by service
     debrid_by_service = await database.fetch_all(
         """
@@ -532,6 +541,8 @@ async def admin_api_metrics(admin_session: str = Cookie(None)):
             },
             "debrid_cache": {
                 "total": total_debrid_cache or 0,
+                "total_storage": total_cache_storage or 0,
+                "total_storage_formatted": format_bytes(total_cache_storage or 0),
                 "by_service": [
                     {
                         "service": row["debrid_service"],

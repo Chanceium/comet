@@ -151,13 +151,13 @@ class BandwidthMonitor:
 
     def format_speed(self, bytes_per_second: float):
         if bytes_per_second < 1024:
-            return f"{bytes_per_second:.0f} B/s"
+            return f"{bytes_per_second:.0f} b/s"
         elif bytes_per_second < 1024**2:
-            return f"{bytes_per_second / 1024:.1f} KB/s"
+            return f"{bytes_per_second / 1024:.1f} Kb/s"
         elif bytes_per_second < 1024**3:
-            return f"{bytes_per_second / (1024**2):.1f} MB/s"
+            return f"{bytes_per_second / (1024**2):.1f} Mb/s"
         else:
-            return f"{bytes_per_second / (1024**3):.2f} GB/s"
+            return f"{bytes_per_second / (1024**3):.2f} Gb/s"
 
     async def _cleanup_inactive_connections(self):
         while True:
