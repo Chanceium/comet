@@ -90,7 +90,7 @@ async def create_user(user_data: UserCreate) -> User:
             }
         )
     
-    logger.log("USER", f"Created user '{user_data.username}' with token '{token}'")
+    logger.info(f"Created user '{user_data.username}' with token '{token}'")
     
     return User(
         id=user_id,
@@ -231,7 +231,7 @@ async def update_user(user_id: int, user_update: UserUpdate) -> Optional[User]:
     
     await database.execute(query, update_values)
     
-    logger.log("USER", f"Updated user ID {user_id}")
+    logger.info(f"Updated user ID {user_id}")
     return await get_user_by_id(user_id)
 
 
@@ -243,7 +243,7 @@ async def delete_user(user_id: int) -> bool:
     )
     
     if result:
-        logger.log("USER", f"Deleted user ID {user_id}")
+        logger.info(f"Deleted user ID {user_id}")
         return True
     return False
 
@@ -266,7 +266,7 @@ async def regenerate_user_token(user_id: int) -> Optional[str]:
         }
     )
     
-    logger.log("USER", f"Regenerated token for user ID {user_id}")
+    logger.info(f"Regenerated token for user ID {user_id}")
     return new_token
 
 
