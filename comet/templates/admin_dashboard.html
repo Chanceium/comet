@@ -1181,15 +1181,7 @@
         if (activePanel === "connections") {
           loadConnections();
         } else if (activePanel === "logs") {
-          loadLogs().then(() => {
-            // Ensure scroll to bottom after logs are loaded when switching tabs
-            setTimeout(() => {
-              const container = document.getElementById("logs-container");
-              if (container) {
-                container.scrollTop = container.scrollHeight;
-              }
-            }, 100);
-          });
+          loadLogs();
         } else if (activePanel === "metrics") {
           loadMetrics();
         }
@@ -1335,12 +1327,6 @@
 
           if (data.logs.length > 0) {
             lastLogTimestamp = Math.max(...data.logs.map((log) => log.created));
-          }
-
-          // Always scroll to bottom after loading logs
-          const container = document.getElementById("logs-container");
-          if (container) {
-            container.scrollTop = container.scrollHeight;
           }
         } catch (error) {
           console.error("Failed to load logs:", error);
