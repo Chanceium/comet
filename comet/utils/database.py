@@ -115,6 +115,20 @@ async def setup_database():
         )
 
         await database.execute(
+            f"""
+                CREATE TABLE IF NOT EXISTS users (
+                    id {"INTEGER PRIMARY KEY AUTOINCREMENT" if settings.DATABASE_TYPE == "sqlite" else "SERIAL PRIMARY KEY"},
+                    username {"TEXT" if settings.DATABASE_TYPE == "sqlite" else "VARCHAR(255)"} UNIQUE NOT NULL,
+                    token {"TEXT" if settings.DATABASE_TYPE == "sqlite" else "VARCHAR(255)"} UNIQUE NOT NULL,
+                    config {"TEXT" if settings.DATABASE_TYPE == "sqlite" else "TEXT"} NOT NULL,
+                    created_at {"INTEGER" if settings.DATABASE_TYPE == "sqlite" else "BIGINT"} NOT NULL,
+                    updated_at {"INTEGER" if settings.DATABASE_TYPE == "sqlite" else "BIGINT"} NOT NULL,
+                    enabled BOOLEAN DEFAULT TRUE
+                )
+            """
+        )
+
+        await database.execute(
             """
                 CREATE TABLE IF NOT EXISTS metadata_cache (
                     media_id TEXT PRIMARY KEY, 

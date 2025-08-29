@@ -17,6 +17,17 @@ from comet.utils.general import config_check
 from comet.utils.log_levels import get_level_info
 from comet.utils.bandwidth_monitor import bandwidth_monitor
 from comet.debrid.manager import get_debrid_extension
+from comet.utils.user_management import (
+    get_user_by_token, 
+    validate_user_token, 
+    create_user,
+    get_all_users,
+    update_user,
+    delete_user,
+    regenerate_user_token,
+    UserCreate,
+    UserUpdate
+)
 
 templates = Jinja2Templates("comet/templates")
 main = APIRouter()
@@ -210,6 +221,57 @@ async def manifest(request: Request, b64config: str = None):
     debrid_extension = get_debrid_extension(config["debridService"])
     base_manifest["name"] = (
         f"{settings.ADDON_NAME}{(' | ' + debrid_extension) if debrid_extension != 'TORRENT' else ''}"
+    )
+
+    return base_manifest
+
+
+@main.get("/user/{token}/manifest.json")
+async def user_manifest(request: Request, token: str):
+    """Token-based user manifest endpoint"""
+    user = await get_user_by_token(token)
+    if not user or not user.enabled:
+        base_manifest = {
+            "id": f"{settings.ADDON_ID}.invalid",
+            "name": "❌ | Comet",
+            "description": f"⚠️ INVALID USER TOKEN, PLEASE GET A VALID TOKEN FROM ADMIN ON {request.url.scheme}://{request.url.netloc}/admin ⚠️",
+            "version": "2.0.0",
+            "catalogs": [],
+            "resources": [
+                {
+                    "name": "stream",
+                    "types": ["movie", "series"],
+                    "idPrefixes": ["tt", "kitsu"],
+                }
+            ],
+            "types": ["movie", "series", "anime", "other"],
+            "logo": "https://i.imgur.com/jmVoVMu.jpeg",
+            "background": "https://i.imgur.com/WwnXB3k.jpeg",
+            "behaviorHints": {"configurable": True, "configurationRequired": False},
+        }
+        return base_manifest
+
+    base_manifest = {
+        "id": f"{settings.ADDON_ID}.{user.username}",
+        "description": f"Stremio's fastest torrent/debrid search add-on - User: {user.username}",
+        "version": "2.0.0",
+        "catalogs": [],
+        "resources": [
+            {
+                "name": "stream",
+                "types": ["movie", "series"],
+                "idPrefixes": ["tt", "kitsu"],
+            }
+        ],
+        "types": ["movie", "series", "anime", "other"],
+        "logo": "https://i.imgur.com/jmVoVMu.jpeg",
+        "background": "https://i.imgur.com/WwnXB3k.jpeg",
+        "behaviorHints": {"configurable": False, "configurationRequired": False},
+    }
+
+    debrid_extension = get_debrid_extension(user.config["debridService"])
+    base_manifest["name"] = (
+        f"{settings.ADDON_NAME} | {user.username}{(' | ' + debrid_extension) if debrid_extension != 'TORRENT' else ''}"
     )
 
     return base_manifest
@@ -544,3 +606,122 @@ async def admin_api_metrics(admin_session: str = Cookie(None)):
             },
         }
     )
+
+
+@main.get("/admin/api/users")
+async def admin_api_users(admin_session: str = Cookie(None)):
+    """Get all users for admin dashboard"""
+    await require_admin_auth(admin_session)
+    users = await get_all_users()
+    
+    user_data = []
+    for user in users:
+        user_data.append({
+            "id": user.id,
+            "username": user.username,
+            "token": user.token,
+            "enabled": user.enabled,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            "config": user.config,
+            "debrid_service": user.config.get("debridService", "unknown"),
+            "formatted_created": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(user.created_at)),
+            "formatted_updated": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(user.updated_at))
+        })
+    
+    return JSONResponse({"users": user_data})
+
+
+@main.post("/admin/api/users")
+async def admin_api_create_user(request: Request, admin_session: str = Cookie(None)):
+    """Create a new user"""
+    await require_admin_auth(admin_session)
+    
+    body = await request.json()
+    username = body.get("username", "").strip()
+    
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required")
+    
+    try:
+        user_create = UserCreate(username=username)
+        user = await create_user(user_create)
+        
+        return JSONResponse({
+            "success": True,
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "token": user.token,
+                "enabled": user.enabled,
+                "created_at": user.created_at,
+                "debrid_service": user.config.get("debridService", "unknown"),
+                "formatted_created": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(user.created_at))
+            }
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to create user: {str(e)}")
+
+
+@main.put("/admin/api/users/{user_id}")
+async def admin_api_update_user(request: Request, user_id: int, admin_session: str = Cookie(None)):
+    """Update a user"""
+    await require_admin_auth(admin_session)
+    
+    body = await request.json()
+    
+    user_update = UserUpdate(
+        username=body.get("username"),
+        enabled=body.get("enabled"),
+        config=body.get("config")
+    )
+    
+    try:
+        user = await update_user(user_id, user_update)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return JSONResponse({
+            "success": True,
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "token": user.token,
+                "enabled": user.enabled,
+                "updated_at": user.updated_at,
+                "debrid_service": user.config.get("debridService", "unknown"),
+                "formatted_updated": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(user.updated_at))
+            }
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to update user: {str(e)}")
+
+
+@main.delete("/admin/api/users/{user_id}")
+async def admin_api_delete_user(user_id: int, admin_session: str = Cookie(None)):
+    """Delete a user"""
+    await require_admin_auth(admin_session)
+    
+    try:
+        success = await delete_user(user_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return JSONResponse({"success": True})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to delete user: {str(e)}")
+
+
+@main.post("/admin/api/users/{user_id}/regenerate-token")
+async def admin_api_regenerate_token(user_id: int, admin_session: str = Cookie(None)):
+    """Regenerate user token"""
+    await require_admin_auth(admin_session)
+    
+    try:
+        new_token = await regenerate_user_token(user_id)
+        if not new_token:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return JSONResponse({"success": True, "token": new_token})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to regenerate token: {str(e)}")

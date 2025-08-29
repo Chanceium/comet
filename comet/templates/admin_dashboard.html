@@ -716,6 +716,82 @@
         border-radius: 4px;
       }
 
+      /* User Management Styles */
+      .users-table {
+        width: 100%;
+        margin-top: 20px;
+        border-collapse: collapse;
+        background-color: #374151;
+        border-radius: 0.5rem;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .users-table th,
+      .users-table td {
+        padding: 12px 16px;
+        text-align: left;
+        border-bottom: 1px solid #4b5563;
+      }
+
+      .users-table th {
+        background-color: #4b5563;
+        font-weight: 600;
+        font-size: 0.875rem;
+        color: #f3f4f6;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .users-table td {
+        color: #e5e7eb;
+        font-size: 0.875rem;
+      }
+
+      .users-table tr:last-child td {
+        border-bottom: none;
+      }
+
+      .users-table tr:hover {
+        background-color: #4b5563;
+      }
+
+      .user-token {
+        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+        font-size: 0.75rem;
+        background-color: #1f2937;
+        padding: 4px 8px;
+        border-radius: 4px;
+        color: #9ca3af;
+        max-width: 120px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .status-badge {
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+      }
+
+      .status-enabled {
+        background-color: #065f46;
+        color: #d1fae5;
+      }
+
+      .status-disabled {
+        background-color: #7f1d1d;
+        color: #fecaca;
+      }
+
+      .user-actions {
+        display: flex;
+        gap: 8px;
+      }
+
       /* Responsive Design for Metrics */
       @media (max-width: 768px) {
         .search-timeline {
@@ -735,6 +811,20 @@
 
         .stats-grid {
           grid-template-columns: repeat(2, 1fr);
+        }
+
+        .users-table {
+          font-size: 0.8rem;
+        }
+
+        .users-table th,
+        .users-table td {
+          padding: 8px 12px;
+        }
+
+        .user-actions {
+          flex-direction: column;
+          gap: 4px;
         }
       }
     </style>
@@ -830,6 +920,10 @@
             <sl-icon name="wifi"></sl-icon>
             &nbsp;Active Connections
           </sl-tab>
+          <sl-tab slot="nav" panel="users">
+            <sl-icon name="people"></sl-icon>
+            &nbsp;User Management
+          </sl-tab>
           <sl-tab slot="nav" panel="metrics">
             <sl-icon name="bar-chart"></sl-icon>
             &nbsp;Metrics
@@ -872,6 +966,32 @@
                 <div class="empty-state">
                   <sl-icon name="wifi-off"></sl-icon>
                   <p>No active connections</p>
+                </div>
+              </div>
+            </div>
+          </sl-tab-panel>
+
+          <sl-tab-panel name="users">
+            <div class="tab-content">
+              <div class="logs-controls" style="margin-bottom: 20px;">
+                <div>
+                  <h3 style="margin: 0; color: #ffffff;">User Management</h3>
+                  <p style="margin: 5px 0 0 0; color: #9ca3af; font-size: 0.9rem;">
+                    Manage user accounts and tokens for Stremio addon access
+                  </p>
+                </div>
+                <div>
+                  <sl-button id="create-user-btn" variant="primary" size="small">
+                    <sl-icon slot="prefix" name="person-plus"></sl-icon>
+                    Create User
+                  </sl-button>
+                </div>
+              </div>
+
+              <div id="users-content">
+                <div class="empty-state">
+                  <sl-icon name="people"></sl-icon>
+                  <p>Loading users...</p>
                 </div>
               </div>
             </div>
@@ -1107,6 +1227,11 @@
           .getElementById("hide-api-logs")
           .addEventListener("sl-change", toggleApiLogsVisibility);
 
+        // User management event listeners
+        document
+          .getElementById("create-user-btn")
+          .addEventListener("click", showCreateUserDialog);
+
         // Tab change handler
         document
           .querySelector("sl-tab-group")
@@ -1154,6 +1279,8 @@
           loadLogs();
         } else if (activePanel === "metrics") {
           loadMetrics();
+        } else if (activePanel === "users") {
+          loadUsers();
         }
         
         // Update URL with current tab
@@ -1641,6 +1768,400 @@
         
         // Update URL without triggering a page reload
         window.history.pushState({ tab: tabName }, '', url.toString());
+      }
+
+      // 👥 USER MANAGEMENT FUNCTIONS
+      async function loadUsers() {
+        try {
+          const response = await fetch("/admin/api/users");
+          const data = await response.json();
+          renderUsersTable(data.users);
+        } catch (error) {
+          console.error("Failed to load users:", error);
+          document.getElementById("users-content").innerHTML =
+            '<div class="empty-state"><sl-icon name="exclamation-triangle"></sl-icon><p>Failed to load users</p></div>';
+        }
+      }
+
+      function renderUsersTable(users) {
+        const container = document.getElementById("users-content");
+
+        if (users.length === 0) {
+          container.innerHTML =
+            '<div class="empty-state"><sl-icon name="people"></sl-icon><p>No users created yet</p></div>';
+          return;
+        }
+
+        const tableHTML = `
+          <table class="users-table">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Token</th>
+                <th>Debrid Service</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${users
+                .map(
+                  (user) => `
+                <tr>
+                  <td>
+                    <strong>${escapeHtml(user.username)}</strong>
+                  </td>
+                  <td>
+                    <span class="user-token" onclick="copyToClipboard('${user.token}')" title="Click to copy token">
+                      ${user.token.substring(0, 8)}...
+                    </span>
+                  </td>
+                  <td>
+                    <span style="text-transform: uppercase; font-weight: 500; color: #60a5fa;">
+                      ${escapeHtml(user.debrid_service)}
+                    </span>
+                  </td>
+                  <td>
+                    <span class="status-badge ${user.enabled ? 'status-enabled' : 'status-disabled'}">
+                      ${user.enabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </td>
+                  <td>
+                    <span style="font-size: 0.875rem; color: #9ca3af;">
+                      ${user.formatted_created}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="user-actions">
+                      <sl-button size="small" variant="neutral" onclick="copyUserManifestUrl(${user.id}, '${user.token}')" title="Copy manifest URL">
+                        <sl-icon name="link-45deg"></sl-icon>
+                      </sl-button>
+                      <sl-button size="small" variant="primary" onclick="editUserConfig(${user.id}, '${escapeHtml(user.username)}')" title="Edit configuration">
+                        <sl-icon name="gear"></sl-icon>
+                      </sl-button>
+                      <sl-button size="small" variant="warning" onclick="regenerateUserToken(${user.id})" title="Regenerate token">
+                        <sl-icon name="arrow-clockwise"></sl-icon>
+                      </sl-button>
+                      <sl-button size="small" variant="${user.enabled ? 'danger' : 'success'}" onclick="toggleUserStatus(${user.id}, ${!user.enabled})" title="${user.enabled ? 'Disable user' : 'Enable user'}">
+                        <sl-icon name="${user.enabled ? 'person-dash' : 'person-check'}"></sl-icon>
+                      </sl-button>
+                      <sl-button size="small" variant="danger" onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" title="Delete user">
+                        <sl-icon name="trash"></sl-icon>
+                      </sl-button>
+                    </div>
+                  </td>
+                </tr>
+              `
+                )
+                .join("")}
+            </tbody>
+          </table>
+        `;
+
+        container.innerHTML = tableHTML;
+      }
+
+      async function showCreateUserDialog() {
+        const username = prompt("Enter username for the new user:");
+        if (!username || !username.trim()) {
+          return;
+        }
+
+        try {
+          const response = await fetch("/admin/api/users", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ username: username.trim() }),
+          });
+
+          const result = await response.json();
+          
+          if (response.ok && result.success) {
+            alert(`User created successfully!\\n\\nUsername: ${result.user.username}\\nToken: ${result.user.token}\\n\\nManifest URL: ${window.location.protocol}//${window.location.host}/user/${result.user.token}/manifest.json`);
+            loadUsers();
+          } else {
+            alert(`Failed to create user: ${result.detail || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error("Failed to create user:", error);
+          alert("Failed to create user. Please try again.");
+        }
+      }
+
+      async function regenerateUserToken(userId) {
+        if (!confirm("Are you sure you want to regenerate this user's token?\\n\\nThe old token will stop working immediately.")) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`/admin/api/users/${userId}/regenerate-token`, {
+            method: "POST",
+          });
+
+          const result = await response.json();
+          
+          if (response.ok && result.success) {
+            alert(`Token regenerated successfully!\\n\\nNew token: ${result.token}`);
+            loadUsers();
+          } else {
+            alert(`Failed to regenerate token: ${result.detail || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error("Failed to regenerate token:", error);
+          alert("Failed to regenerate token. Please try again.");
+        }
+      }
+
+      async function toggleUserStatus(userId, newStatus) {
+        const action = newStatus ? "enable" : "disable";
+        if (!confirm(`Are you sure you want to ${action} this user?`)) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`/admin/api/users/${userId}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ enabled: newStatus }),
+          });
+
+          const result = await response.json();
+          
+          if (response.ok && result.success) {
+            loadUsers();
+          } else {
+            alert(`Failed to ${action} user: ${result.detail || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error(`Failed to ${action} user:`, error);
+          alert(`Failed to ${action} user. Please try again.`);
+        }
+      }
+
+      async function deleteUser(userId, username) {
+        if (!confirm(`Are you sure you want to delete user "${username}"?\\n\\nThis action cannot be undone.`)) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`/admin/api/users/${userId}`, {
+            method: "DELETE",
+          });
+
+          const result = await response.json();
+          
+          if (response.ok && result.success) {
+            alert(`User "${username}" deleted successfully.`);
+            loadUsers();
+          } else {
+            alert(`Failed to delete user: ${result.detail || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error("Failed to delete user:", error);
+          alert("Failed to delete user. Please try again.");
+        }
+      }
+
+      async function copyToClipboard(text) {
+        try {
+          await navigator.clipboard.writeText(text);
+          // Show a brief success message
+          const originalContent = event.target.textContent;
+          event.target.textContent = "Copied!";
+          event.target.style.color = "#10b981";
+          setTimeout(() => {
+            event.target.textContent = originalContent;
+            event.target.style.color = "";
+          }, 1000);
+        } catch (error) {
+          console.error("Failed to copy to clipboard:", error);
+          // Fallback for older browsers
+          const textArea = document.createElement("textarea");
+          textArea.value = text;
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textArea);
+        }
+      }
+
+      function copyUserManifestUrl(userId, token) {
+        const manifestUrl = `${window.location.protocol}//${window.location.host}/user/${token}/manifest.json`;
+        copyToClipboard(manifestUrl);
+      }
+
+      async function editUserConfig(userId, username) {
+        try {
+          // First, get the current user data
+          const response = await fetch("/admin/api/users");
+          const data = await response.json();
+          const user = data.users.find(u => u.id === userId);
+          
+          if (!user) {
+            alert("User not found");
+            return;
+          }
+
+          // Create a configuration dialog
+          const configDialog = document.createElement('div');
+          configDialog.innerHTML = `
+            <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 10000;">
+              <div style="background: #1a1d20; padding: 30px; border-radius: 12px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+                <h3 style="color: #ffffff; margin: 0 0 20px 0;">Edit Configuration - ${escapeHtml(username)}</h3>
+                
+                <div style="margin-bottom: 15px;">
+                  <label style="color: #e5e7eb; font-weight: 500; display: block; margin-bottom: 5px;">Debrid Service:</label>
+                  <select id="edit-debrid-service" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #4b5563; background: #374151; color: #e5e7eb;">
+                    <option value="realdebrid">Real-Debrid</option>
+                    <option value="alldebrid">AllDebrid</option>
+                    <option value="premiumize">Premiumize</option>
+                    <option value="torbox">TorBox</option>
+                    <option value="debridlink">DebridLink</option>
+                    <option value="torrent">Torrent (No Debrid)</option>
+                  </select>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                  <label style="color: #e5e7eb; font-weight: 500; display: block; margin-bottom: 5px;">Debrid API Key:</label>
+                  <input type="password" id="edit-debrid-apikey" placeholder="Enter debrid API key" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #4b5563; background: #374151; color: #e5e7eb;">
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                  <label style="color: #e5e7eb; font-weight: 500; display: block; margin-bottom: 5px;">Max Results Per Resolution:</label>
+                  <input type="number" id="edit-max-results" min="0" max="50" value="0" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #4b5563; background: #374151; color: #e5e7eb;">
+                  <small style="color: #9ca3af;">0 = unlimited</small>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                  <label style="color: #e5e7eb; font-weight: 500; display: block; margin-bottom: 5px;">Max Size (GB):</label>
+                  <input type="number" id="edit-max-size" min="0" step="0.1" value="0" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #4b5563; background: #374151; color: #e5e7eb;">
+                  <small style="color: #9ca3af;">0 = unlimited</small>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                  <label style="color: #e5e7eb; font-weight: 500; display: block; margin-bottom: 10px;">Resolutions:</label>
+                  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                    <label style="color: #e5e7eb; font-size: 0.9rem; display: flex; align-items: center;">
+                      <input type="checkbox" id="edit-res-2160p" style="margin-right: 8px;"> 4K (2160p)
+                    </label>
+                    <label style="color: #e5e7eb; font-size: 0.9rem; display: flex; align-items: center;">
+                      <input type="checkbox" id="edit-res-1080p" style="margin-right: 8px;"> 1080p
+                    </label>
+                    <label style="color: #e5e7eb; font-size: 0.9rem; display: flex; align-items: center;">
+                      <input type="checkbox" id="edit-res-720p" style="margin-right: 8px;"> 720p
+                    </label>
+                    <label style="color: #e5e7eb; font-size: 0.9rem; display: flex; align-items: center;">
+                      <input type="checkbox" id="edit-res-480p" style="margin-right: 8px;"> 480p
+                    </label>
+                    <label style="color: #e5e7eb; font-size: 0.9rem; display: flex; align-items: center;">
+                      <input type="checkbox" id="edit-res-360p" style="margin-right: 8px;"> 360p
+                    </label>
+                  </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                  <label style="color: #e5e7eb; font-weight: 500; display: flex; align-items: center;">
+                    <input type="checkbox" id="edit-cached-only" style="margin-right: 8px;"> Cached Only
+                  </label>
+                  <small style="color: #9ca3af;">Only show torrents that are cached on the debrid service</small>
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                  <button onclick="closeConfigDialog()" style="padding: 8px 16px; background: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+                  <button onclick="saveUserConfig(${userId})" style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">Save Changes</button>
+                </div>
+              </div>
+            </div>
+          `;
+
+          document.body.appendChild(configDialog);
+
+          // Populate current values
+          const config = user.config || {};
+          document.getElementById('edit-debrid-service').value = config.debridService || 'realdebrid';
+          document.getElementById('edit-debrid-apikey').value = config.debridApiKey || '';
+          document.getElementById('edit-max-results').value = config.maxResultsPerResolution || 0;
+          document.getElementById('edit-max-size').value = config.maxSize || 0;
+          document.getElementById('edit-cached-only').checked = config.cachedOnly || false;
+
+          // Set resolution checkboxes
+          const resolutions = config.resolutions || {};
+          document.getElementById('edit-res-2160p').checked = resolutions.r2160p !== false;
+          document.getElementById('edit-res-1080p').checked = resolutions.r1080p !== false;
+          document.getElementById('edit-res-720p').checked = resolutions.r720p !== false;
+          document.getElementById('edit-res-480p').checked = resolutions.r480p !== false;
+          document.getElementById('edit-res-360p').checked = resolutions.r360p !== false;
+
+        } catch (error) {
+          console.error("Failed to open config editor:", error);
+          alert("Failed to open configuration editor. Please try again.");
+        }
+      }
+
+
+      function closeConfigDialog() {
+        const dialog = document.querySelector('div[style*="position: fixed"][style*="z-index: 10000"]');
+        if (dialog) {
+          dialog.remove();
+        }
+      }
+
+      async function saveUserConfig(userId) {
+        try {
+          const config = {
+            debridService: document.getElementById('edit-debrid-service').value,
+            debridApiKey: document.getElementById('edit-debrid-apikey').value,
+            maxResultsPerResolution: parseInt(document.getElementById('edit-max-results').value) || 0,
+            maxSize: parseFloat(document.getElementById('edit-max-size').value) || 0,
+            cachedOnly: document.getElementById('edit-cached-only').checked,
+            resolutions: {
+              r2160p: document.getElementById('edit-res-2160p').checked,
+              r1080p: document.getElementById('edit-res-1080p').checked,
+              r720p: document.getElementById('edit-res-720p').checked,
+              r480p: document.getElementById('edit-res-480p').checked,
+              r360p: document.getElementById('edit-res-360p').checked,
+              unknown: true
+            },
+            removeTrash: true,
+            resultFormat: ["all"],
+            languages: { required: [], exclude: [], preferred: [] },
+            options: {
+              title_similarity: 0.85,
+              remove_all_trash: true,
+              remove_ranks_under: -10000000000,
+              remove_unknown_languages: false,
+              allow_english_in_languages: false,
+              enable_fetch_speed_mode: true,
+              remove_adult_content: true
+            }
+          };
+
+          const response = await fetch(`/admin/api/users/${userId}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ config: config }),
+          });
+
+          const result = await response.json();
+          
+          if (response.ok && result.success) {
+            alert("Configuration updated successfully!\\n\\nChanges will take effect immediately for new stream requests.");
+            closeConfigDialog();
+            loadUsers();
+          } else {
+            alert(`Failed to update configuration: ${result.detail || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error("Failed to save user config:", error);
+          alert("Failed to save configuration. Please try again.");
+        }
       }
     </script>
   </body>

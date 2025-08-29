@@ -20,6 +20,7 @@ from comet.debrid.manager import get_debrid_extension, get_debrid
 from comet.utils.streaming import custom_handle_stream_request
 from comet.utils.logger import logger
 from comet.utils.distributed_lock import DistributedLock, is_scrape_in_progress
+from comet.utils.user_management import get_user_by_token
 
 streams = APIRouter()
 
@@ -100,27 +101,47 @@ async def wait_for_scrape_completion(media_id: str, context: str = ""):
 
 @streams.get("/stream/{media_type}/{media_id}.json")
 @streams.get("/{b64config}/stream/{media_type}/{media_id}.json")
+@streams.get("/user/{token}/stream/{media_type}/{media_id}.json")
 async def stream(
     request: Request,
     media_type: str,
     media_id: str,
     background_tasks: BackgroundTasks,
     b64config: str = None,
+    token: str = None,
 ):
     if "tmdb:" in media_id:
         return {"streams": []}
 
-    config = config_check(b64config)
-    if not config:
-        return {
-            "streams": [
-                {
-                    "name": "[❌] Comet",
-                    "description": f"⚠️ OBSOLETE CONFIGURATION, PLEASE RE-CONFIGURE ON {request.url.scheme}://{request.url.netloc} ⚠️",
-                    "url": "https://comet.fast",
-                }
-            ]
-        }
+    # Handle token-based authentication
+    if token:
+        user = await get_user_by_token(token)
+        if not user or not user.enabled:
+            return {
+                "streams": [
+                    {
+                        "name": "[❌] Comet",
+                        "description": f"⚠️ INVALID USER TOKEN, PLEASE GET A VALID TOKEN FROM ADMIN ON {request.url.scheme}://{request.url.netloc}/admin ⚠️",
+                        "url": "https://comet.fast",
+                    }
+                ]
+            }
+        config = user.config
+        config_source = "user_token"
+    else:
+        # Handle legacy b64config authentication
+        config = config_check(b64config)
+        if not config:
+            return {
+                "streams": [
+                    {
+                        "name": "[❌] Comet",
+                        "description": f"⚠️ OBSOLETE CONFIGURATION, PLEASE RE-CONFIGURE ON {request.url.scheme}://{request.url.netloc} ⚠️",
+                        "url": "https://comet.fast",
+                    }
+                ]
+            }
+        config_source = "b64config"
 
     connector = aiohttp.TCPConnector(limit=0)
     async with aiohttp.ClientSession(connector=connector) as session:
@@ -425,9 +446,14 @@ async def stream(
                 else:
                     the_stream["sources"] = torrent["sources"]
             else:
-                the_stream["url"] = (
-                    f"{request.url.scheme}://{request.url.netloc}/{b64config}/playback/{info_hash}/{torrent['fileIndex'] if torrent['cached'] and torrent['fileIndex'] is not None else 'n'}/{quote(title)}/{result_season}/{result_episode}/{quote(torrent_title)}"
-                )
+                if config_source == "user_token":
+                    the_stream["url"] = (
+                        f"{request.url.scheme}://{request.url.netloc}/user/{token}/playback/{info_hash}/{torrent['fileIndex'] if torrent['cached'] and torrent['fileIndex'] is not None else 'n'}/{quote(title)}/{result_season}/{result_episode}/{quote(torrent_title)}"
+                    )
+                else:
+                    the_stream["url"] = (
+                        f"{request.url.scheme}://{request.url.netloc}/{b64config}/playback/{info_hash}/{torrent['fileIndex'] if torrent['cached'] and torrent['fileIndex'] is not None else 'n'}/{quote(title)}/{result_season}/{result_episode}/{quote(torrent_title)}"
+                    )
 
             if torrent["cached"]:
                 cached_results.append(the_stream)
@@ -440,17 +466,31 @@ async def stream(
 @streams.get(
     "/{b64config}/playback/{hash}/{index}/{name}/{season}/{episode}/{torrent_name}"
 )
+@streams.get(
+    "/user/{token}/playback/{hash}/{index}/{name}/{season}/{episode}/{torrent_name}"
+)
 async def playback(
     request: Request,
-    b64config: str,
     hash: str,
     index: str,
     name: str,
     season: str,
     episode: str,
     torrent_name: str,
+    b64config: str = None,
+    token: str = None,
 ):
-    config = config_check(b64config)
+    # Handle token-based authentication
+    if token:
+        user = await get_user_by_token(token)
+        if not user or not user.enabled:
+            return FileResponse("comet/assets/uncached.mp4")
+        config = user.config
+    else:
+        # Handle legacy b64config authentication
+        config = config_check(b64config)
+        if not config:
+            return FileResponse("comet/assets/uncached.mp4")
 
     season = int(season) if season != "n" else None
     episode = int(episode) if episode != "n" else None
