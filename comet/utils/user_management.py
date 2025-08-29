@@ -5,8 +5,20 @@ import json
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 
-from comet.utils.models import database, default_config
+from comet.utils.models import database, default_config, CometSettingsModel
 from comet.utils.logger import logger
+from RTN import BestRanking
+
+
+def reconstruct_config_models(config: dict) -> dict:
+    """Reconstruct Pydantic model objects from serialized config data"""
+    if isinstance(config.get("rtnSettings"), dict):
+        config["rtnSettings"] = CometSettingsModel.model_validate(config["rtnSettings"])
+    
+    if isinstance(config.get("rtnRanking"), dict):
+        config["rtnRanking"] = BestRanking.model_validate(config["rtnRanking"])
+    
+    return config
 
 
 class User(BaseModel):
@@ -122,6 +134,7 @@ async def get_user_by_token(token: str) -> Optional[User]:
         
     try:
         config = json.loads(row["config"])
+        config = reconstruct_config_models(config)
     except (json.JSONDecodeError, TypeError):
         logger.error(f"Invalid config JSON for user {row['username']}")
         config = default_config.copy()
@@ -153,6 +166,7 @@ async def get_user_by_id(user_id: int) -> Optional[User]:
         
     try:
         config = json.loads(row["config"])
+        config = reconstruct_config_models(config)
     except (json.JSONDecodeError, TypeError):
         logger.error(f"Invalid config JSON for user {row['username']}")
         config = default_config.copy()
@@ -182,6 +196,7 @@ async def get_all_users() -> List[User]:
     for row in rows:
         try:
             config = json.loads(row["config"])
+            config = reconstruct_config_models(config)
         except (json.JSONDecodeError, TypeError):
             logger.error(f"Invalid config JSON for user {row['username']}")
             config = default_config.copy()
