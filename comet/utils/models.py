@@ -601,8 +601,8 @@ class ConfigModel(BaseModel):
 
 
 default_config = ConfigModel().model_dump()
-default_config["rtnSettings"] = rtn_settings_default
-default_config["rtnRanking"] = rtn_ranking_default
+default_config["rtnSettings"] = rtn_settings_default.model_dump()
+default_config["rtnRanking"] = rtn_ranking_default.model_dump()
 
 
 
