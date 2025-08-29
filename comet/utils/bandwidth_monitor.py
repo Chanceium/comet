@@ -82,8 +82,8 @@ class BandwidthMonitor:
                 # Start new session
                 self._session_start = current_time
                 await database.execute(
-                    "INSERT INTO session_stats (id, session_start, session_bytes, peak_concurrent, last_updated) VALUES (1, ?, 0, 0, ?)",
-                    (current_time, current_time)
+                    "INSERT INTO session_stats (id, session_start, session_bytes, peak_concurrent, last_updated) VALUES (1, :session_start, 0, 0, :last_updated)",
+                    {"session_start": current_time, "last_updated": current_time}
                 )
         except Exception:
             # Fallback to memory-only mode
@@ -196,17 +196,17 @@ class BandwidthMonitor:
             # Try to update existing record
             result = await database.execute(
                 """UPDATE ip_stream_stats 
-                   SET stream_count = stream_count + 1, last_seen = ? 
-                   WHERE ip_address = ?""",
-                (current_time, ip)
+                   SET stream_count = stream_count + 1, last_seen = :last_seen 
+                   WHERE ip_address = :ip_address""",
+                {"last_seen": current_time, "ip_address": ip}
             )
             
             # If no existing record, create new one
             if result == 0:  # No rows updated
                 await database.execute(
                     """INSERT INTO ip_stream_stats (ip_address, stream_count, first_seen, last_seen, total_bytes_transferred)
-                       VALUES (?, 1, ?, ?, 0)""",
-                    (ip, current_time, current_time)
+                       VALUES (:ip_address, 1, :first_seen, :last_seen, 0)""",
+                    {"ip_address": ip, "first_seen": current_time, "last_seen": current_time}
                 )
                 
             # Log the stream start
@@ -220,9 +220,9 @@ class BandwidthMonitor:
         try:
             await database.execute(
                 """UPDATE ip_stream_stats 
-                   SET total_bytes_transferred = total_bytes_transferred + ? 
-                   WHERE ip_address = ?""",
-                (bytes_transferred, ip)
+                   SET total_bytes_transferred = total_bytes_transferred + :bytes_transferred 
+                   WHERE ip_address = :ip_address""",
+                {"bytes_transferred": bytes_transferred, "ip_address": ip}
             )
             
             # Log the stream completion
@@ -268,14 +268,14 @@ class BandwidthMonitor:
                     try:
                         # Try to insert first
                         await database.execute(
-                            "INSERT INTO bandwidth_stats (id, total_bytes, last_updated) VALUES (1, ?, ?)",
-                            (total_bytes, current_time),
+                            "INSERT INTO bandwidth_stats (id, total_bytes, last_updated) VALUES (1, :total_bytes, :last_updated)",
+                            {"total_bytes": total_bytes, "last_updated": current_time},
                         )
                     except Exception:
                         # If insert fails (record exists), update instead
                         await database.execute(
-                            "UPDATE bandwidth_stats SET total_bytes = ?, last_updated = ? WHERE id = 1",
-                            (total_bytes, current_time),
+                            "UPDATE bandwidth_stats SET total_bytes = :total_bytes, last_updated = :last_updated WHERE id = 1",
+                            {"total_bytes": total_bytes, "last_updated": current_time},
                         )
 
                     with self._lock:
@@ -284,15 +284,15 @@ class BandwidthMonitor:
                 # Update session stats
                 try:
                     await database.execute(
-                        "UPDATE session_stats SET session_bytes = ?, peak_concurrent = ?, last_updated = ? WHERE id = 1",
-                        (session_bytes, peak_concurrent, current_time),
+                        "UPDATE session_stats SET session_bytes = :session_bytes, peak_concurrent = :peak_concurrent, last_updated = :last_updated WHERE id = 1",
+                        {"session_bytes": session_bytes, "peak_concurrent": peak_concurrent, "last_updated": current_time},
                     )
                 except Exception:
                     # Table might not exist, try to create entry
                     try:
                         await database.execute(
-                            "INSERT INTO session_stats (id, session_start, session_bytes, peak_concurrent, last_updated) VALUES (1, ?, ?, ?, ?)",
-                            (getattr(self, '_session_start', current_time), session_bytes, peak_concurrent, current_time),
+                            "INSERT INTO session_stats (id, session_start, session_bytes, peak_concurrent, last_updated) VALUES (1, :session_start, :session_bytes, :peak_concurrent, :last_updated)",
+                            {"session_start": getattr(self, '_session_start', current_time), "session_bytes": session_bytes, "peak_concurrent": peak_concurrent, "last_updated": current_time},
                         )
                     except Exception:
                         pass  # Ignore if already exists
@@ -311,8 +311,8 @@ class BandwidthMonitor:
         # Update database
         try:
             await database.execute(
-                "UPDATE session_stats SET session_start = ?, session_bytes = 0, peak_concurrent = 0, last_updated = ? WHERE id = 1",
-                (current_time, current_time),
+                "UPDATE session_stats SET session_start = :session_start, session_bytes = 0, peak_concurrent = 0, last_updated = :last_updated WHERE id = 1",
+                {"session_start": current_time, "last_updated": current_time},
             )
         except Exception as e:
             logger.warning(f"Error resetting session stats in database: {e}")
