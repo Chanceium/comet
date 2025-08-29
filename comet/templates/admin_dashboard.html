@@ -401,7 +401,7 @@
         }
       }
 
-      /* 📊 METRICS STYLES */
+      /* METRICS STYLES */
       .metrics-grid {
         display: flex;
         flex-direction: column;
@@ -1032,6 +1032,32 @@
                   </div>
                 </div>
 
+                <!-- IP Stream Analytics -->
+                <div class="metric-section">
+                  <h3><sl-icon name="globe"></sl-icon> IP Stream Analytics</h3>
+                  <div class="metric-content">
+                    <div class="metric-subsection">
+                      <h4>Overview</h4>
+                      <div class="stats-grid">
+                        <div class="stat-item">
+                          <span class="stat-value" id="total-unique-ips">0</span>
+                          <span class="stat-desc">Unique IPs</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="metric-subsection">
+                      <h4>Top Streaming IPs</h4>
+                      <div id="top-ips" class="data-list">
+                        <div class="loading-state">
+                          <sl-spinner></sl-spinner>
+                          <span>Loading IP statistics...</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- Search Analytics -->
                 <div class="metric-section metric-section-compact">
                   <h3><sl-icon name="search"></sl-icon> Search Analytics</h3>
@@ -1155,7 +1181,15 @@
         if (activePanel === "connections") {
           loadConnections();
         } else if (activePanel === "logs") {
-          loadLogs();
+          loadLogs().then(() => {
+            // Ensure scroll to bottom after logs are loaded when switching tabs
+            setTimeout(() => {
+              const container = document.getElementById("logs-container");
+              if (container) {
+                container.scrollTop = container.scrollHeight;
+              }
+            }, 100);
+          });
         } else if (activePanel === "metrics") {
           loadMetrics();
         }
@@ -1302,6 +1336,12 @@
           if (data.logs.length > 0) {
             lastLogTimestamp = Math.max(...data.logs.map((log) => log.created));
           }
+
+          // Always scroll to bottom after loading logs
+          const container = document.getElementById("logs-container");
+          if (container) {
+            container.scrollTop = container.scrollHeight;
+          }
         } catch (error) {
           console.error("Failed to load logs:", error);
         }
@@ -1425,7 +1465,7 @@
         return div.innerHTML;
       }
 
-      // 📊 METRICS FUNCTIONS
+      // METRICS FUNCTIONS
       async function loadMetrics() {
         try {
           const response = await fetch("/admin/api/metrics");
@@ -1436,6 +1476,7 @@
           updateSearchSection(data.searches);
           updateMediaDistribution(data.torrents.media_distribution);
           updateDebridCacheSection(data.debrid_cache);
+          updateIPStatsSection(data.ip_stats);
         } catch (error) {
           console.error("Failed to load metrics:", error);
           showMetricsError();
@@ -1602,6 +1643,35 @@
                     <span class="service-total-size">Total: ${
                       service.total_size_formatted
                     }</span>
+                  </div>
+                </div>
+              `
+            )
+            .join("");
+        }
+      }
+
+      function updateIPStatsSection(ipData) {
+        // Update overview stats
+        document.getElementById("total-unique-ips").textContent =
+          ipData.total_unique_ips.toLocaleString();
+
+        // Update top IPs list
+        const topIPsContainer = document.getElementById("top-ips");
+        if (ipData.top_ips.length === 0) {
+          topIPsContainer.innerHTML =
+            '<div class="empty-state"><sl-icon name="globe-americas"></sl-icon><p>No IP stream data available</p></div>';
+        } else {
+          topIPsContainer.innerHTML = ipData.top_ips
+            .map(
+              (ip) => `
+                <div class="tracker-item">
+                  <div class="tracker-name">${escapeHtml(ip.ip_address)}</div>
+                  <div class="tracker-stats">
+                    <span class="ip-streams">${ip.stream_count} streams</span>
+                    <span class="ip-bytes">${ip.total_bytes_formatted} transferred</span>
+                    <span class="ip-first-seen">First: ${ip.first_seen_formatted}</span>
+                    <span class="ip-last-seen">Last: ${ip.last_seen_formatted}</span>
                   </div>
                 </div>
               `

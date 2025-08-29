@@ -71,7 +71,7 @@ class LoguruHandler:
         if message.strip():
             # Try to extract timestamp, level, module, function, and message
             # This is a simplified parser for loguru format
-            pattern = r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| ([🌠👾👻🎬🔒🏭📰🕸️⚠️❌💀]?) ?(\w+) \| (\w+)\.(\w+) - (.+)"
+            pattern = r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| (.*?) ?(\w+) \| (\w+)\.(\w+) - (.+)"
             match = re.match(pattern, message.strip())
 
             if match:
@@ -201,9 +201,9 @@ async def manifest(request: Request, b64config: str = None):
 
     config = config_check(b64config)
     if not config:
-        base_manifest["name"] = "❌ | Comet"
+        base_manifest["name"] = "ERROR | Comet"
         base_manifest["description"] = (
-            f"⚠️ OBSOLETE CONFIGURATION, PLEASE RE-CONFIGURE ON {request.url.scheme}://{request.url.netloc} ⚠️"
+            f"WARNING: OBSOLETE CONFIGURATION, PLEASE RE-CONFIGURE ON {request.url.scheme}://{request.url.netloc}"
         )
         return base_manifest
 
@@ -356,12 +356,49 @@ async def admin_api_connections(admin_session: str = Cookie(None)):
 async def admin_api_logs(admin_session: str = Cookie(None), since: float = 0):
     await require_admin_auth(admin_session)
 
-    # Get logs since the specified timestamp
-    all_logs = log_capture.get_logs()
-    new_logs = [log for log in all_logs if log["created"] > since]
+    # Try to get logs from database first, fallback to memory
+    try:
+        # Get persistent logs from database
+        persistent_logs = await database.fetch_all(
+            """SELECT timestamp, level, module, function, message, icon, color, created
+               FROM persistent_logs 
+               WHERE created > ? 
+               ORDER BY created DESC 
+               LIMIT 1000""",
+            (since,)
+        )
+        
+        # Convert to format expected by frontend
+        new_logs = []
+        for log in persistent_logs:
+            new_logs.append({
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(log["timestamp"])),
+                "level": log["level"],
+                "icon": log["icon"] or "LOG",
+                "color": log["color"] or "#ffffff",
+                "module": log["module"],
+                "function": log["function"], 
+                "message": log["message"],
+                "created": log["created"]
+            })
+        
+        # Get total count
+        total_logs = await database.fetch_val("SELECT COUNT(*) FROM persistent_logs") or 0
+        
+        # If no persistent logs, fallback to memory logs
+        if not new_logs:
+            memory_logs = log_capture.get_logs()
+            new_logs = [log for log in memory_logs if log["created"] > since]
+            total_logs = len(memory_logs)
+        
+    except Exception:
+        # Fallback to memory-based logs if database fails
+        all_logs = log_capture.get_logs()
+        new_logs = [log for log in all_logs if log["created"] > since]
+        total_logs = len(all_logs)
 
     return JSONResponse(
-        {"logs": new_logs, "total_logs": len(all_logs), "new_logs": len(new_logs)}
+        {"logs": new_logs, "total_logs": total_logs, "new_logs": len(new_logs)}
     )
 
 
@@ -372,7 +409,7 @@ async def admin_api_metrics(admin_session: str = Cookie(None)):
 
     current_time = time.time()
 
-    # 📊 TORRENTS METRICS
+    # TORRENTS METRICS
     total_torrents = await database.fetch_val("SELECT COUNT(*) FROM torrents")
 
     # Torrents by tracker
@@ -422,7 +459,7 @@ async def admin_api_metrics(admin_session: str = Cookie(None)):
         GROUP BY media_type
     """)
 
-    # 🔍 SEARCH METRICS
+    # SEARCH METRICS
     total_unique_searches = await database.fetch_val(
         "SELECT COUNT(*) FROM first_searches"
     )
@@ -443,13 +480,13 @@ async def admin_api_metrics(admin_session: str = Cookie(None)):
         {"time_30d": current_time - 2592000},
     )
 
-    # 🔧 SCRAPER METRICS
+    # SCRAPER METRICS
     active_locks = await database.fetch_val(
         "SELECT COUNT(*) FROM scrape_locks WHERE expires_at > :current_time",
         {"current_time": current_time},
     )
 
-    # 💾 DEBRID CACHE METRICS
+    # DEBRID CACHE METRICS
     total_debrid_cache = await database.fetch_val(
         "SELECT COUNT(*) FROM debrid_availability"
     )
@@ -473,6 +510,21 @@ async def admin_api_metrics(admin_session: str = Cookie(None)):
         ORDER BY count DESC
     """,
         {"cache_ttl": settings.DEBRID_CACHE_TTL, "current_time": current_time},
+    )
+
+    # IP STREAM METRICS
+    ip_stream_stats = await database.fetch_all(
+        """
+        SELECT ip_address, stream_count, total_bytes_transferred, first_seen, last_seen
+        FROM ip_stream_stats 
+        ORDER BY stream_count DESC 
+        LIMIT 20
+        """
+    )
+
+    # Total unique IPs
+    total_unique_ips = await database.fetch_val(
+        "SELECT COUNT(*) FROM ip_stream_stats"
     )
 
     # Format helper function
@@ -551,6 +603,21 @@ async def admin_api_metrics(admin_session: str = Cookie(None)):
                         "total_size_formatted": format_bytes(row["total_size"] or 0),
                     }
                     for row in debrid_by_service
+                ],
+            },
+            "ip_stats": {
+                "total_unique_ips": total_unique_ips or 0,
+                "top_ips": [
+                    {
+                        "ip_address": row["ip_address"],
+                        "stream_count": row["stream_count"],
+                        "total_bytes_formatted": format_bytes(row["total_bytes_transferred"] or 0),
+                        "first_seen_formatted": time.strftime("%Y-%m-%d %H:%M", time.localtime(row["first_seen"])),
+                        "last_seen_formatted": time.strftime("%Y-%m-%d %H:%M", time.localtime(row["last_seen"])),
+                        "first_seen": row["first_seen"],
+                        "last_seen": row["last_seen"],
+                    }
+                    for row in ip_stream_stats
                 ],
             },
         }

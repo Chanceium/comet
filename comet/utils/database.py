@@ -293,6 +293,64 @@ async def setup_database():
         )
 
         await database.execute(
+            f"""
+                CREATE TABLE IF NOT EXISTS session_stats (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    session_start INTEGER NOT NULL,
+                    session_bytes {"INTEGER" if settings.DATABASE_TYPE == "sqlite" else "BIGINT"} DEFAULT 0,
+                    peak_concurrent INTEGER DEFAULT 0,
+                    last_updated INTEGER
+                )
+            """
+        )
+
+        await database.execute(
+            """
+                CREATE TABLE IF NOT EXISTS persistent_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    level TEXT NOT NULL,
+                    module TEXT NOT NULL,
+                    function TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    icon TEXT,
+                    color TEXT,
+                    created INTEGER NOT NULL
+                )
+            """
+        )
+
+        await database.execute(
+            """
+            CREATE INDEX IF NOT EXISTS persistent_logs_timestamp_idx ON persistent_logs(timestamp)
+            """
+        )
+
+        await database.execute(
+            """
+            CREATE INDEX IF NOT EXISTS persistent_logs_level_idx ON persistent_logs(level)
+            """
+        )
+
+        await database.execute(
+            """
+                CREATE TABLE IF NOT EXISTS ip_stream_stats (
+                    ip_address TEXT PRIMARY KEY,
+                    stream_count INTEGER DEFAULT 0,
+                    first_seen INTEGER NOT NULL,
+                    last_seen INTEGER NOT NULL,
+                    total_bytes_transferred INTEGER DEFAULT 0
+                )
+            """
+        )
+
+        await database.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ip_stream_stats_last_seen_idx ON ip_stream_stats(last_seen)
+            """
+        )
+
+        await database.execute(
             """
                 CREATE TABLE IF NOT EXISTS background_scraper_progress (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -385,7 +443,7 @@ async def cleanup_expired_locks():
                 {"current_time": current_time},
             )
         except Exception as e:
-            logger.log("LOCK", f"❌ Error during periodic lock cleanup: {e}")
+            logger.log("LOCK", f"Error during periodic lock cleanup: {e}")
 
         await asyncio.sleep(60)
 
@@ -399,7 +457,7 @@ async def cleanup_expired_sessions():
                 {"current_time": current_time},
             )
         except Exception as e:
-            logger.log("SESSION", f"❌ Error during periodic session cleanup: {e}")
+            logger.log("SESSION", f"Error during periodic session cleanup: {e}")
 
         await asyncio.sleep(5)  # Clean up every 5 seconds
 

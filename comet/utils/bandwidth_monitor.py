@@ -45,6 +45,7 @@ class BandwidthMonitor:
             "peak_concurrent": 0,
         }
         self._last_synced_bytes = 0
+        self._session_start = time.time()
         self._cleanup_task = None
         self._db_sync_task = None
         self._initialized = False
@@ -65,6 +66,28 @@ class BandwidthMonitor:
         except Exception:
             # Table might not exist yet, will be created later
             pass
+
+        # Load or initialize session stats
+        current_time = time.time()
+        try:
+            session_data = await database.fetch_one(
+                "SELECT session_start, session_bytes, peak_concurrent FROM session_stats WHERE id = 1"
+            )
+            if session_data:
+                # Continue existing session
+                self._session_start = session_data["session_start"]
+                self._global_stats["total_bytes_session"] = int(session_data["session_bytes"])
+                self._global_stats["peak_concurrent"] = int(session_data["peak_concurrent"])
+            else:
+                # Start new session
+                self._session_start = current_time
+                await database.execute(
+                    "INSERT INTO session_stats (id, session_start, session_bytes, peak_concurrent, last_updated) VALUES (1, ?, 0, 0, ?)",
+                    (current_time, current_time)
+                )
+        except Exception:
+            # Fallback to memory-only mode
+            self._session_start = current_time
 
         # Start background tasks
         self._cleanup_task = asyncio.create_task(self._cleanup_inactive_connections())
@@ -92,6 +115,9 @@ class BandwidthMonitor:
                 self._global_stats["active_connections"],
             )
 
+        # Track IP stream stats in database
+        await self._track_ip_stream(ip)
+
     def update_connection(self, connection_id: str, bytes_chunk: int):
         with self._lock:
             if connection_id in self._connections:
@@ -104,6 +130,10 @@ class BandwidthMonitor:
             metrics = self._connections.pop(connection_id, None)
             if metrics:
                 self._global_stats["active_connections"] = len(self._connections)
+
+                # Update IP stats with bytes transferred
+                if metrics.bytes_transferred > 0:
+                    await self._update_ip_bytes(metrics.ip, metrics.bytes_transferred)
 
                 # Log final metrics (only once at end, no spam)
                 # total_mb = metrics.bytes_transferred / (1024 * 1024)
@@ -159,6 +189,48 @@ class BandwidthMonitor:
         else:
             return f"{bytes_per_second / (1024**3):.2f} Gb/s"
 
+    async def _track_ip_stream(self, ip: str):
+        """Track when an IP starts a new stream"""
+        current_time = time.time()
+        try:
+            # Try to update existing record
+            result = await database.execute(
+                """UPDATE ip_stream_stats 
+                   SET stream_count = stream_count + 1, last_seen = ? 
+                   WHERE ip_address = ?""",
+                (current_time, ip)
+            )
+            
+            # If no existing record, create new one
+            if result == 0:  # No rows updated
+                await database.execute(
+                    """INSERT INTO ip_stream_stats (ip_address, stream_count, first_seen, last_seen, total_bytes_transferred)
+                       VALUES (?, 1, ?, ?, 0)""",
+                    (ip, current_time, current_time)
+                )
+                
+            # Log the stream start
+            logger.log("STREAM", f"Stream started from IP {ip}")
+                
+        except Exception as e:
+            logger.warning(f"Error tracking IP stream for {ip}: {e}")
+
+    async def _update_ip_bytes(self, ip: str, bytes_transferred: int):
+        """Update bytes transferred for an IP"""
+        try:
+            await database.execute(
+                """UPDATE ip_stream_stats 
+                   SET total_bytes_transferred = total_bytes_transferred + ? 
+                   WHERE ip_address = ?""",
+                (bytes_transferred, ip)
+            )
+            
+            # Log the stream completion
+            logger.log("STREAM", f"Stream ended for IP {ip} - {self.format_bytes(bytes_transferred)} transferred")
+            
+        except Exception as e:
+            logger.warning(f"Error updating IP bytes for {ip}: {e}")
+
     async def _cleanup_inactive_connections(self):
         while True:
             try:
@@ -186,29 +258,75 @@ class BandwidthMonitor:
 
                 with self._lock:
                     total_bytes = self._global_stats["total_bytes_alltime"]
+                    session_bytes = self._global_stats["total_bytes_session"]
+                    peak_concurrent = self._global_stats["peak_concurrent"]
 
-                    if total_bytes == self._last_synced_bytes:
-                        continue
+                current_time = time.time()
 
                 # Update database with alltime total
+                if total_bytes != self._last_synced_bytes:
+                    try:
+                        # Try to insert first
+                        await database.execute(
+                            "INSERT INTO bandwidth_stats (id, total_bytes, last_updated) VALUES (1, ?, ?)",
+                            (total_bytes, current_time),
+                        )
+                    except Exception:
+                        # If insert fails (record exists), update instead
+                        await database.execute(
+                            "UPDATE bandwidth_stats SET total_bytes = ?, last_updated = ? WHERE id = 1",
+                            (total_bytes, current_time),
+                        )
+
+                    with self._lock:
+                        self._last_synced_bytes = total_bytes
+
+                # Update session stats
                 try:
-                    # Try to insert first
                     await database.execute(
-                        "INSERT INTO bandwidth_stats (id, total_bytes, last_updated) VALUES (1, :total_bytes, :timestamp)",
-                        {"total_bytes": total_bytes, "timestamp": time.time()},
+                        "UPDATE session_stats SET session_bytes = ?, peak_concurrent = ?, last_updated = ? WHERE id = 1",
+                        (session_bytes, peak_concurrent, current_time),
                     )
                 except Exception:
-                    # If insert fails (record exists), update instead
-                    await database.execute(
-                        "UPDATE bandwidth_stats SET total_bytes = :total_bytes, last_updated = :timestamp WHERE id = 1",
-                        {"total_bytes": total_bytes, "timestamp": time.time()},
-                    )
-
-                with self._lock:
-                    self._last_synced_bytes = total_bytes
+                    # Table might not exist, try to create entry
+                    try:
+                        await database.execute(
+                            "INSERT INTO session_stats (id, session_start, session_bytes, peak_concurrent, last_updated) VALUES (1, ?, ?, ?, ?)",
+                            (getattr(self, '_session_start', current_time), session_bytes, peak_concurrent, current_time),
+                        )
+                    except Exception:
+                        pass  # Ignore if already exists
 
             except Exception as e:
                 logger.warning(f"Error syncing bandwidth stats to database: {e}")
+
+    async def reset_session(self):
+        """Reset session stats - start tracking from scratch"""
+        current_time = time.time()
+        with self._lock:
+            self._global_stats["total_bytes_session"] = 0
+            self._global_stats["peak_concurrent"] = 0
+            self._session_start = current_time
+            
+        # Update database
+        try:
+            await database.execute(
+                "UPDATE session_stats SET session_start = ?, session_bytes = 0, peak_concurrent = 0, last_updated = ? WHERE id = 1",
+                (current_time, current_time),
+            )
+        except Exception as e:
+            logger.warning(f"Error resetting session stats in database: {e}")
+
+    def get_session_info(self):
+        """Get session duration and start time"""
+        with self._lock:
+            current_time = time.time()
+            session_duration = current_time - self._session_start
+            return {
+                "session_start": self._session_start,
+                "session_duration": session_duration,
+                "session_duration_formatted": f"{int(session_duration // 3600)}h {int((session_duration % 3600) // 60)}m"
+            }
 
     async def shutdown(self):
         if self._cleanup_task:
